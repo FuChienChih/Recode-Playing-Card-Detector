@@ -1,22 +1,8 @@
 import cv2
 import numpy as np
-import time
 import os
 import Cards
-import VideoStream
 
-
-IM_WIDTH = 1280
-IM_HEIGHT = 720 
-FRAME_RATE = 10
-
-frame_rate_calc = 1
-freq = cv2.getTickFrequency()
-
-font = cv2.FONT_HERSHEY_SIMPLEX
-
-# videostream = VideoStream.VideoStream((IM_WIDTH,IM_HEIGHT),FRAME_RATE,1,0).start()
-time.sleep(1) # Give the camera time to warm up
 
 path = os.path.dirname(os.path.abspath(__file__))
 train_ranks = Cards.load_ranks( path + '/Card_Imgs/')
@@ -27,31 +13,44 @@ cam_quit = 0
 # Grab frame from video stream
 image = cv2.imread("T99.png")
 
-# Pre-process camera image (gray, blur, and threshold it)
+# 影像預處理
 pre_proc = Cards.preprocess_image(image)
-cv2.imshow("mask", pre_proc)
-cv2.waitKey(0)
-# Find and sort the contours of all cards in the image (query cards)
+
+# 偵測卡牌
 cnts_sort, cnt_is_card = Cards.find_cards(pre_proc)
-# If there are no contours, do nothing
+
+# 沒偵測輪廓，不執行
 if len(cnts_sort) != 0:
-    # Initialize a new "cards" list to assign the card objects.
-    # k indexes the newly made array of cards.
     cards = []
     k = 0
 
-    # For each contour detected:
+    # 從所有輪廓中找到牌，並將影像存入 cards
     for i in range(len(cnts_sort)):
         if (cnt_is_card[i] == 1):
-
+            # 判斷card的size決定要不要再分割10/27   應該要對cnts_sort[i]做for處理，直到cnts_sort[i]的size小於一定的值
+            x,y,w,h = cv2.boundingRect(cnts_sort[i])
+            print('=============')
+            temp_x,temp_y,temp_w,temp_h = x,y,w,h
+            while temp_w*temp_h > 30*30:
+                print('x,y,w,h',x,y,w,h)
+                cv2.imshow("ori", image[y:y+h,x:x+w])
+                print(f'ori({y}:{y+h},{x}:{x+w})')
+                cv2.imshow("cut", image[temp_y:temp_y+13,x:x+w])
+                print(f'cut({y}:{y+13.5},{x}:{x+w})')
+                cv2.waitKey(0)
+                temp_y += 13
+                temp_h -= 13
+                
+            # 或許可以在preprocess_card中做遞迴，並將return設為list不用append用+
             cards.append(Cards.preprocess_card(cnts_sort[i],image))
+            print(cards[k].contour)
+
             cards[k].best_rank_match,cards[k].best_suit_match,cards[k].rank_diff,cards[k].suit_diff = Cards.match_card(cards[k],train_ranks,train_suits)
 
-            # Draw center point and match result on the image.
-            image = Cards.draw_results(image, cards[k])
+            print('w,h = ',cards[k].width,cards[k].height)
             k = k + 1
-    # Draw card contours on image (have to do contours all at once or
-    # they do not show up properly for some reason)
+
+    # 畫框
     if (len(cards) != 0):
         temp_cnts = []
         for i in range(len(cards)):
@@ -60,9 +59,6 @@ if len(cnts_sort) != 0:
     
     
 
-# Finally, display the image with the identified cards!
+# 原圖展示
 cv2.imshow("Card Detector",image)
-
-
-# Poll the keyboard. If 'q' is pressed, exit the main loop.
 cv2.waitKey(0)
