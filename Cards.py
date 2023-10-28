@@ -32,8 +32,8 @@ SUIT_HEIGHT = 100
 RANK_DIFF_MAX = 2000
 SUIT_DIFF_MAX = 700
 
-CARD_MAX_AREA = 2000
-CARD_MIN_AREA = 100
+CARD_MAX_AREA = 4000
+CARD_MIN_AREA = 90
 
 font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -162,23 +162,16 @@ def find_cards(thresh_image):
 
     return cnts_sort, cnt_is_card
 
-def preprocess_card(contour, image):
+def preprocess_card(x,y,w,h,image):
     """Uses contour to find information about the query card. Isolates rank
     and suit images from the card."""
 
     # Initialize new Query_card object
     qCard = Query_card()
-
-    qCard.contour = contour
-
-    # Find perimeter of card and use it to approximate corner points
-    peri = cv2.arcLength(contour,True)
-    approx = cv2.approxPolyDP(contour,0.02*peri,True)
-    pts = np.float32(approx)
+    pts = np.array([[[x,y]],[[x+w,y]],[[x+w,y+h]],[[x,y+h]]], dtype = np.float32)
+    # pts = np.array([[y,x],[y,x+w],[y+h,x+w],[y+h,x]], dtype = np.float32)
     qCard.corner_pts = pts
-
     # Find width and height of card's bounding rectangle
-    x,y,w,h = cv2.boundingRect(contour)
     qCard.width, qCard.height = w, h
     
     # Find center point of card by taking x and y average of the four corners.
@@ -188,19 +181,40 @@ def preprocess_card(contour, image):
     qCard.center = [cent_x, cent_y]
 
     # Warp card into 200x300 flattened image using perspective transform
-    qCard.warp = flattener(image, pts, w, h)
-    
+    # qCard.warp = flattener(image, pts, w, h)
+    qCard.warp = image[y:y+h,x:x+h]
+
+
     # Grab corner of warped card image and do a 4x zoom
     # Qcorner = qCard.warp[0:CORNER_HEIGHT, ]
     Qcorner_zoom = cv2.resize(qCard.warp, (0,0), fx=4, fy=4)
     
-    # Split in to top and bottom half (top shows rank, bottom shows suit)
-    cv2.imshow("Qcorner_zoom", Qcorner_zoom)
-    cv2.waitKey(0)
-    # Qrank = Qcorner_zoom[20:185, 0:128]
-    # Qsuit = Qcorner_zoom[186:336, 0:128]
-
+    # 從card中取出rank suit存在card的屬性中
+    # Qrank = qCard.warp[6:84,8:59] # flattener 重啟時重啟
+    Qrank = image[y+1:y+h-1,x+21:x+30]
     
+    corner_zoom = cv2.resize(Qrank, (0,0), fx=4, fy=4)
+    corner_blur = cv2.GaussianBlur(corner_zoom,(5,5),0)
+    Qrank_sized = cv2.resize(corner_blur, (RANK_WIDTH, RANK_HEIGHT), 0, 0)
+    Qrank_sized = cv2.cvtColor(Qrank_sized,cv2.COLOR_BGR2GRAY)
+    qCard.rank_img = Qrank_sized
+    
+    
+    # Qsuit = qCard.warp[6:80,135:193] # # flattener 重啟時重啟
+    Qsuit = image[y+1:y+h-1,x+2:x+10]
+    corner_zoom = cv2.resize(Qsuit, (0,0), fx=4, fy=4)
+    corner_blur = cv2.GaussianBlur(corner_zoom,(5,5),0)
+    Qsuit_sized = cv2.resize(Qsuit, (SUIT_WIDTH, SUIT_HEIGHT), 0, 0)
+    Qsuit_sized = cv2.cvtColor(Qsuit_sized,cv2.COLOR_BGR2GRAY)
+    qCard.suit_img = Qsuit_sized
+    cv2.imshow('Qsuit_sized',Qsuit_sized)
+    cv2.imshow('Qrank_sized',Qrank_sized)
+    cv2.waitKey(0)
+    
+    # Qrank_sized = cv2.resize(Qrank, (RANK_WIDTH,RANK_HEIGHT), 0, 0)
+    # qCard.rank_img = Qrank_sized
+    # Qsuit_sized = cv2.resize(Qsuit, (SUIT_WIDTH, SUIT_HEIGHT), 0, 0)
+    # qCard.suit_img = Qsuit_sized
     
     # # Find rank contour and bounding rectangle, isolate and find largest contour
     # Qrank_cnts, hier = cv2.findContours(Qrank, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
@@ -243,12 +257,14 @@ def match_card(qCard, train_ranks, train_suits):
     # the img size is zero, so skip the differencing process
     # (card will be left as Unknown)
     if (len(qCard.rank_img) != 0) and (len(qCard.suit_img) != 0):
-        
         # Difference the query card rank image from each of the train rank images,
         # and store the result with the least difference
         for Trank in train_ranks:
 
                 diff_img = cv2.absdiff(qCard.rank_img, Trank.img)
+                # cv2.imshow('Qcard',qCard.rank_img)
+                # cv2.imshow('TrainCard',Trank.img)
+                # cv2.waitKey(0)
                 rank_diff = int(np.sum(diff_img)/255)
                 
                 if rank_diff < best_rank_match_diff:
@@ -260,6 +276,9 @@ def match_card(qCard, train_ranks, train_suits):
         for Tsuit in train_suits:
                 
                 diff_img = cv2.absdiff(qCard.suit_img, Tsuit.img)
+                cv2.imshow('Qcard',qCard.suit_img)
+                cv2.imshow('TrainCard',Tsuit.img)
+                cv2.waitKey(0)
                 suit_diff = int(np.sum(diff_img)/255)
                 
                 if suit_diff < best_suit_match_diff:
@@ -313,7 +332,6 @@ def flattener(image, pts, w, h):
     temp_rect = np.zeros((4,2), dtype = "float32")
     
     s = np.sum(pts, axis = 2)
-
     tl = pts[np.argmin(s)]
     br = pts[np.argmax(s)]
 
@@ -329,10 +347,8 @@ def flattener(image, pts, w, h):
             
         
     maxWidth = 200
-    maxHeight = 300
-    print('image')
-    cv2.imshow("image", image[192:224,415:447])
-    cv2.waitKey(0)
+    maxHeight = 100
+
     # Create destination array, calculate perspective transform matrix,
     # and warp card image
     dst = np.array([[0,0],[maxWidth-1,0],[maxWidth-1,maxHeight-1],[0, maxHeight-1]], np.float32)
