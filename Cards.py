@@ -10,6 +10,9 @@
 import numpy as np
 import cv2
 import time
+import os
+path = os.path.dirname(os.path.abspath(__file__))
+
 
 ### Constants ###
 
@@ -40,41 +43,55 @@ font = cv2.FONT_HERSHEY_SIMPLEX
 ### Structures to hold query card and train card information ###
 
 class Query_card:
-    """Structure to store information about query cards in the camera image."""
+    """
+    這個類別用於儲存單張卡片的相關屬性。
+
+    Attributes:
+        - contour : 卡片的輪廓。
+        - warp : 38x18大小的、灰階、模糊處理過的圖像。
+        - rank_img : 卡片點數圖像。
+        - suit_img : 卡片花色圖像。
+        - best_rank_match : 最佳匹配點數。
+        - best_suit_match : 最佳匹配花色。
+        - rank_diff : 點數圖像與訓練圖像之間的差異。
+        - suit_diff : 花色圖像與訓練圖像之間的差異。
+    """
 
     def __init__(self):
-        self.contour = [] # Contour of card
-        self.x, self.y = 0, 0
-        self.width, self.height = 0, 0 # Width and height of card
-        self.corner_pts = [] # Corner points of card
-        self.center = [] # Center point of card
-        self.warp = [] # 200x300, flattened, grayed, blurred image
-        self.rank_img = [] # Thresholded, sized image of card's rank
-        self.suit_img = [] # Thresholded, sized image of card's suit
-        self.best_rank_match = "Unknown" # Best matched rank
-        self.best_suit_match = "Unknown" # Best matched suit
-        self.rank_diff = 0 # Difference between rank image and best matched train rank image
-        self.suit_diff = 0 # Difference between suit image and best matched train suit image
+        self.contour = []
+        self.warp = []
+        self.rank_img = []
+        self.suit_img = []
+        self.best_rank_match = "Unknown"
+        self.best_suit_match = "Unknown"
+        self.rank_diff = 0
+        self.suit_diff = 0
 
 class Train_ranks:
-    """Structure to store information about train rank images."""
+    """用於儲存訓練圖像(點數)"""
 
     def __init__(self):
-        self.img = [] # Thresholded, sized rank image loaded from hard drive
+        self.img = []
         self.name = "Placeholder"
 
 class Train_suits:
-    """Structure to store information about train suit images."""
+    """用於儲存訓練圖像(花色)"""
 
     def __init__(self):
-        self.img = [] # Thresholded, sized suit image loaded from hard drive
+        self.img = []
         self.name = "Placeholder"
 
 ### Functions ###
 def load_ranks(filepath):
-    """Loads rank images from directory specified by filepath. Stores
-    them in a list of Train_ranks objects."""
+    """
+    從指定路徑載入訓練用圖像 後續用於判斷Qcard物件的"最佳匹配數字"。
 
+    Parameters:
+        - filepath (str): 點數圖像的檔案路徑。
+
+    Returns:
+        - train_ranks (list): 包含Train_ranks物件的list。
+    """
     train_ranks = []
     i = 0
     
@@ -91,8 +108,15 @@ def load_ranks(filepath):
     return train_ranks
 
 def load_suits(filepath):
-    """Loads suit images from directory specified by filepath. Stores
-    them in a list of Train_suits objects."""
+    """
+    從指定路徑載入訓練用圖像 後續用於判斷Qcard物件的"最佳匹配花色"。
+
+    Parameters:
+        - filepath (str): 點數圖像的檔案路徑。
+
+    Returns:
+        - train_suits (list): 包含Train_suits物件的list。
+    """
 
     train_suits = []
     i = 0
@@ -106,33 +130,8 @@ def load_suits(filepath):
 
     return train_suits
 
-def preprocess_image(image):
-    """Returns a grayed, blurred, and adaptively thresholded camera image."""
-
-    gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray,(1,1),0)
-
-    # The best threshold level depends on the ambient lighting conditions.
-    # For bright lighting, a high threshold must be used to isolate the cards
-    # from the background. For dim lighting, a low threshold must be used.
-    # To make the card detector independent of lighting conditions, the
-    # following adaptive threshold method is used.
-    #
-    # A background pixel in the center top of the image is sampled to determine
-    # its intensity. The adaptive threshold is set at 50 (THRESH_ADDER) higher
-    # than that. This allows the threshold to adapt to the lighting conditions.
-    img_w, img_h = np.shape(image)[:2]
-    bkg_level = gray[int(img_h/100)][int(img_w/2)]
-    thresh_level = bkg_level + BKG_THRESH
-
-    retval, thresh = cv2.threshold(blur,thresh_level,255,cv2.THRESH_BINARY)
-    
-    return blur
-
 def find_cards(thresh_image):
-    """Finds all card-sized contours in a thresholded camera image.
-    Returns the number of cards, and a list of card contours sorted
-    from largest to smallest."""
+    """此函式根據輪廓size大到小排列 並判斷輪廓是否包含手牌輪廓的各種特徵"""
 
     # 找出所有輪廓值，階級（輪廓內還有多少輪廓），儲存在index_sort
     cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
@@ -149,11 +148,6 @@ def find_cards(thresh_image):
         cnts_sort.append(cnts[i])
         hier_sort.append(hier[0][i])
 
-    # Determine which of the contours are cards by applying the
-    # following criteria: 1) Smaller area than the maximum card size,
-    # 2), bigger area than the minimum card size, 3) have no parents,
-    # and 4) have four corners
-
     for i in range(len(cnts_sort)):
         size = cv2.contourArea(cnts_sort[i])
         peri = cv2.arcLength(cnts_sort[i],True) # 是否閉合
@@ -166,127 +160,94 @@ def find_cards(thresh_image):
     return cnts_sort, cnt_is_card
 
 def preprocess_card(x,y,w,h,image):
-    """Uses contour to find information about the query card. Isolates rank
-    and suit images from the card."""
+    """
+    預處理卡片圖像。
+
+    Parameters:
+    - x (int): 手牌的左上角 x 坐标。
+    - y (int): 手牌的左上角 y 坐标。
+    - w (int): 手牌的宽度。
+    - h (int): 手牌的高度。
+    - image (numpy.ndarray): 输入的图像，通常是 BGR 格式的图像。
+
+    Returns:
+    - qCard_list : 存放卡片物件的list
+    - 卡片物件 : 包含每一張單獨卡片的座標,中心,數字圖像,花色圖像...等屬性
+
+    Description:
+    此方法用來預處理"手牌"(一張或多張撲克牌)
+    將手牌分割成多張“卡片”(card)
+    預處理包括裁剪、大小調整 以確保卡片圖像有一致的格式和特徵
+    """
     qCard_list = []
+    # 將手牌調整成預設大小
     cards = image[y:y+h,x:x+w]
     cards_w = 38
     cards_h = int(h*38/w)
     cards = cv2.resize(cards, (cards_w, cards_h),0,0)
+    
+    # 要分割的卡片x,y座標
     x_card,y_card = x,y
+
+    # 以手牌座標為基準,卡片的y座標
     last_y = 0
     while cards_h > 30 :
+        # 建立一個卡片物件
         qCard = Query_card()
-        qCard.width, qCard.height = 38, 15 # 預設卡片大小
-        qCard.x, qCard.y = x_card, y_card
-        # print(qCard.x, qCard.y, qCard.width, qCard.height)
-        pts = np.array([[[qCard.x,qCard.y]],[[qCard.x+qCard.width,qCard.y]],[[qCard.x+qCard.width,qCard.y+qCard.height]]
-                        ,[[qCard.x,qCard.y+qCard.height]]], dtype = np.float32)
-        qCard.corner_pts = pts
-        average = np.sum(pts, axis=0)/len(pts)
-        cent_x = int(average[0][0])
-        cent_y = int(average[0][1])
-        qCard.center = [cent_x, cent_y]
-        # ========================
         qCard.warp = cards[last_y:last_y+18,:]
-        # cv2.imshow('qCard.warp',qCard.warp)
-        # cv2.waitKey(0)
         
-        # 從card中取出rank suit存在card的屬性中
+        # 從card中取出rank_img存入card的屬性中
         Qrank = qCard.warp[:14,2:10]
-
         Qrank = cv2.cvtColor(Qrank,cv2.COLOR_BGR2GRAY)
         corner_zoom = cv2.resize(Qrank, (0,0), fx=4, fy=4)
         corner_blur = cv2.GaussianBlur(corner_zoom,(5,5),0)
         Qrank_sized = cv2.resize(corner_blur, (RANK_WIDTH, RANK_HEIGHT), 0, 0)
         qCard.rank_img = Qrank_sized
-        
+
+        # 從card中取出suit_img存入card的屬性中
         Qsuit = qCard.warp[1:14,26:]
-        # cv2.imshow('Qsuit',Qsuit)
-        # cv2.waitKey(0)
         Qsuit = cv2.cvtColor(Qsuit,cv2.COLOR_BGR2GRAY)
         corner_zoom = cv2.resize(Qsuit, (0,0), fx=4, fy=4)
         corner_blur = cv2.GaussianBlur(corner_zoom,(3,3),0)
         Qsuit_sized = cv2.resize(corner_blur, (SUIT_WIDTH, SUIT_HEIGHT), 0, 0)
-        
         qCard.suit_img = Qsuit_sized
-        # cv2.imshow('Qsuit_sized',Qsuit_sized)
-        # cv2.imshow('qCard.rank_img ',qCard.rank_img )
-        # cv2.waitKey(0)
-        
         qCard_list.append(qCard)
 
+        # 利用match_card賦予卡片rank_name suit_name...等屬性
+        match_card(qCard)
+        # 把紀錄過的卡片從手牌中切除
         last_y += 18
-        x_card,y_card = x_card ,y_card + 18
+        y_card = y_card + 18
         cards_h -= 18
     
     return qCard_list
-    # Initialize new Query_card object
-    # qCard = Query_card()
-    # pts = np.array([[[x,y]],[[x+w,y]],[[x+w,y+h]],[[x,y+h]]], dtype = np.float32)
 
-    # qCard.corner_pts = pts
-
-    # qCard.width, qCard.height = 38, 15
-
-    # average = np.sum(pts, axis=0)/len(pts)
-    # cent_x = int(average[0][0])
-    # cent_y = int(average[0][1])
-    # qCard.center = [cent_x, cent_y]
-
-    # qCard.warp = flattener(image, pts, w, h)
-    # cv2.imshow('card',qCard.warp)
-    # cv2.waitKey(0)
-    # Qcorner_zoom = cv2.resize(qCard.warp, (0,0), fx=4, fy=4)
+def match_card(qCard):
+    """
+    對卡片物件進行點數和花色匹配。
     
-    # # 從card中取出rank suit存在card的屬性中
-    # Qrank = qCard.warp[:,1:10]
+    Description:
+    此函數將卡片物件 `QCard` 與訓練用的點數和花色圖像進行匹配，以識別卡片的點數和花色。
+    它計算點數圖像和花色圖像與訓練用圖像的差異，並找到最佳匹配的點數和花色。
+    如果差異小於某個閾值（`RANK_DIFF_MAX` 和 `SUIT_DIFF_MAX`），則將識別為該點數和花色。
 
-    # Qrank = cv2.cvtColor(Qrank,cv2.COLOR_BGR2GRAY)
-    # corner_zoom = cv2.resize(Qrank, (0,0), fx=4, fy=4)
-    # corner_blur = cv2.GaussianBlur(corner_zoom,(5,5),0)
-    # Qrank_sized = cv2.resize(corner_blur, (RANK_WIDTH, RANK_HEIGHT), 0, 0)
-    # qCard.rank_img = Qrank_sized
+    """
+
     
-    # Qsuit = qCard.warp[1:14,26:]
-
-    # Qsuit = cv2.cvtColor(Qsuit,cv2.COLOR_BGR2GRAY)
-    # corner_zoom = cv2.resize(Qsuit, (0,0), fx=4, fy=4)
-    # corner_blur = cv2.GaussianBlur(corner_zoom,(3,3),0)
-    # Qsuit_sized = cv2.resize(corner_blur, (SUIT_WIDTH, SUIT_HEIGHT), 0, 0)
+    train_ranks = load_ranks( path + '/Card_Imgs/')
+    train_suits = load_suits( path + '/Card_Imgs/')
     
-    # qCard.suit_img = Qsuit_sized
-
-
-    return qCard_list
-
-def match_card(qCard, train_ranks, train_suits):
-    """Finds best rank and suit matches for the query card. Differences
-    the query card rank and suit images with the train rank and suit images.
-    The best match is the rank or suit image that has the least difference."""
-
     best_rank_match_diff = 10000
     best_suit_match_diff = 10000
     best_rank_match_name = "Unknown"
     best_suit_match_name = "Unknown"
     i = 0
 
-    # If no contours were found in query card in preprocess_card function,
-    # the img size is zero, so skip the differencing process
-    # (card will be left as Unknown)
     if (len(qCard.rank_img) != 0) and (len(qCard.suit_img) != 0):
-        # Difference the query card rank image from each of the train rank images,
-        # and store the result with the least difference
         for Trank in train_ranks:
-                # cv2.imshow('img',Trank.img)
-                # cv2.waitKey(0)
 
                 diff_img = cv2.absdiff(qCard.rank_img, Trank.img)
-                # cv2.imshow('Qcard_rank',qCard.rank_img)
-                # cv2.imshow('TrainCard_rank',Trank.img)
-                # cv2.waitKey(0)
                 rank_diff = int(np.sum(diff_img)/255)
-                # print(f'{ Trank.name}:{rank_diff}')
                 
                 if rank_diff < best_rank_match_diff:
                     best_rank_diff_img = diff_img
@@ -297,9 +258,6 @@ def match_card(qCard, train_ranks, train_suits):
         for Tsuit in train_suits:
                 
                 diff_img = cv2.absdiff(qCard.suit_img, Tsuit.img)
-                # cv2.imshow('Qcard_suit',qCard.suit_img)
-                # cv2.imshow('TrainCard_suit',Tsuit.img)
-                # cv2.waitKey(0)
                 suit_diff = int(np.sum(diff_img)/255)
                 
                 if suit_diff < best_suit_match_diff:
@@ -307,22 +265,19 @@ def match_card(qCard, train_ranks, train_suits):
                     best_suit_match_diff = suit_diff
                     best_suit_name = Tsuit.name
 
-    # Combine best rank match and best suit match to get query card's identity.
-    # If the best matches have too high of a difference value, card identity
-    # is still Unknown
     if (best_rank_match_diff < RANK_DIFF_MAX):
         best_rank_match_name = best_rank_name
 
     if (best_suit_match_diff < SUIT_DIFF_MAX):
         best_suit_match_name = best_suit_name
 
-    # Return the identiy of the card and the quality of the suit and rank match
-    return best_rank_match_name, best_suit_match_name, best_rank_match_diff, best_suit_match_diff
+    qCard.best_rank_match,qCard.best_suit_match,qCard.rank_diff,qCard.suit_diff = \
+    best_rank_match_name, best_suit_match_name, best_rank_match_diff, best_suit_match_diff
+    return
     
     
 def draw_results(image, qCard):
     """Draw the card name, center point, and contour on the camera image."""
-
     x = qCard.center[0]
     y = qCard.center[1]
     cv2.circle(image,(x,y),5,(255,0,0),-1)
@@ -346,37 +301,19 @@ def draw_results(image, qCard):
 
     return image
 
-def flattener(image, pts, w, h):
-    """Flattens an image of a card into a top-down 200x300 perspective.
-    Returns the flattened, re-sized, grayed image.
-    See www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/"""
-    temp_rect = np.zeros((4,2), dtype = "float32")
-    
-    s = np.sum(pts, axis = 2)
-    tl = pts[np.argmin(s)]
-    br = pts[np.argmax(s)]
-
-    diff = np.diff(pts, axis = -1)
-    tr = pts[np.argmin(diff)]
-    bl = pts[np.argmax(diff)]
-
-
-    temp_rect[0] = tl
-    temp_rect[1] = tr
-    temp_rect[2] = br
-    temp_rect[3] = bl
-            
-        
-    maxWidth = 38
-    maxHeight = 15
-
-    # Create destination array, calculate perspective transform matrix,
-    # and warp card image
-    dst = np.array([[0,0],[maxWidth-1,0],[maxWidth-1,maxHeight-1],[0, maxHeight-1]], np.float32)
-    M = cv2.getPerspectiveTransform(temp_rect,dst)
-    warp = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
-    # warp = cv2.cvtColor(warp,cv2.COLOR_BGR2GRAY)
-
-        
-
-    return warp
+# 去除圖像噪音保留卡牌輪廓
+def denoise_image(image):
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h_min = 0
+    s_min = 0
+    v_min = 230
+    h_max = 179
+    s_max = 58
+    v_max = 255
+    lower = np.array([h_min,s_min,v_min])
+    upper = np.array([h_max,s_max,v_max])
+    mask = cv2.inRange(hsv, lower, upper)
+    denoised_image = cv2.bitwise_and(image, image ,mask = mask)
+    denoised_image = cv2.cvtColor(denoised_image,cv2.COLOR_BGR2GRAY)
+    denoised_image = cv2.GaussianBlur(denoised_image,(1,1),0)
+    return denoised_image
