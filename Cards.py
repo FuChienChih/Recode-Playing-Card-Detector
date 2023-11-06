@@ -1,11 +1,3 @@
-############## Playing Card Detector Functions ###############
-#
-# Author: Evan Juras
-# Date: 9/5/17
-# Description: Functions and classes for CardDetector.py that perform 
-# various steps of the card detection algorithm
-
-
 # Import necessary packages
 import numpy as np
 import cv2
@@ -317,3 +309,34 @@ def denoise_image(image):
     denoised_image = cv2.cvtColor(denoised_image,cv2.COLOR_BGR2GRAY)
     denoised_image = cv2.GaussianBlur(denoised_image,(1,1),0)
     return denoised_image
+
+import csv
+def update_data(serial_number,serial_number_dict,path_csv,new_hand = True):
+    if not new_hand:
+        card = serial_number_dict[serial_number][1][0] # 最後一張發的牌 
+        data_to_write = f'{card.best_rank_match} {card.best_suit_match}\n'
+        csv_file = path_csv
+        with open(csv_file, 'a') as file:
+            writer = csv.writer(file)
+            writer.writerow([data_to_write])
+        print('best_rank_matchbest_rank_match',serial_number_dict[serial_number][1][0].best_rank_match)
+        return
+    elif new_hand and len(serial_number_dict[serial_number][1])==1 :
+        card = serial_number_dict[serial_number][1][0] # 最後一張發的牌 
+        data_to_write = f'{card.best_rank_match} {card.best_suit_match}\n'
+        csv_file = path_csv
+        with open(csv_file, 'a') as file:
+            writer = csv.writer(file)
+            writer.writerow([data_to_write])
+        print('best_rank_matchbest_rank_match',serial_number_dict[serial_number][1][0].best_rank_match)
+        return
+        # data_to_write = ''
+        # csv_file = path_csv
+        # for i in range(len(serial_number_dict[serial_number][1])):
+        #     card = serial_number_dict[serial_number][1][i] 
+        #     data_to_write += card.best_rank_match+card.best_suit_match+ '\n'
+        # with open(csv_file, 'a') as file:
+        #     writer = csv.writer(file)
+        #     writer.writerow([data_to_write])
+    else:
+        return
